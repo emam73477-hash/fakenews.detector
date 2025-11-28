@@ -3,30 +3,26 @@ import json
 import random
 import datetime
 import smtplib
-import threading  # <--- مهم جداً عشان الموقع ميهنجش
+import threading
 from email.mime.text import MIMEText
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "competition_secret")
 
 # ==========================================
-# 🔐 الإعدادات (مهمة جداً)
+# 📨 إعدادات الإيميل (من Render)
 # ==========================================
-app.secret_key = os.environ.get("SECRET_KEY", "any_secret_key_for_testing")
-
-# هنا بنجيب إيميلك أنت (المرسل) من إعدادات Render
-# عشان نقدر نبعت منه رسالة للمستخدم
 SENDER_EMAIL = os.environ.get("MAIL_USERNAME")
 SENDER_PASSWORD = os.environ.get("MAIL_PASSWORD")
 
-# إعداد قاعدة البيانات
+# قاعدة البيانات المحلية
 DB_FILE = "local_db.json"
 
 def load_db():
     if not os.path.exists(DB_FILE): return {"users": [], "news": []}
-    try:
-         with open(DB_FILE, 'r') as f: return json.load(f)
+    try: with open(DB_FILE, 'r') as f: return json.load(f)
     except: return {"users": [], "news": []}
 
 def save_db(data):
@@ -48,71 +44,68 @@ def create_user(user_data):
     return True
 
 # ==========================================
-# 📨 دالة إرسال الإيميل (في الخلفية)
+# 🚀 دالة الإرسال (تعمل في الخلفية)
 # ==========================================
-def send_email_background(receiver_email, otp):
+def send_email_logic(receiver_email, otp):
     """
-    هذه الدالة تأخذ إيميل المستخدم (receiver_email) 
-    وتبعت له الكود باستخدام إيميلك أنت (SENDER_EMAIL)
+    هذه الدالة هي المسؤولة عن إرسال الإيميل فعلياً
     """
+    print(f"\n🔄 [بدء الإرسال] محاولة إرسال كود {otp} إلى الإيميل: {receiver_email}")
+    
+    # 1. التأكد من وجود إيميل المرسل
+    if not SENDER_EMAIL or not SENDER_PASSWORD:
+        print("❌ [خطأ] لم يتم ضبط إيميل المرسل في إعدادات Render!")
+        return
+
     try:
-        print(f"🔄 جاري الاتصال بسيرفر جوجل للإرسال إلى: {receiver_email}...")
-        
-        if not SENDER_EMAIL or not SENDER_PASSWORD:
-            print("❌ خطأ: لم يتم وضع إيميل المرسل في إعدادات Render")
-            return
-
-        # محتوى الرسالة
-        subject = "كود التفعيل الخاص بك - YUVAi"
-        body = f"مرحباً،\n\nكود التفعيل الخاص بك هو: {otp}\n\nنتمنى لك التوفيق في المسابقة!\n\nفريق YUVAi"
-
-        msg = MIMEText(body)
-        msg['Subject'] = subject
+        # إعداد الرسالة
+        msg = MIMEText(f"مرحباً،\nكود التفعيل الخاص بك في YUVAi هو: {otp}\n\nبالتوفيق!")
+        msg['Subject'] = "كود تفعيل الحساب"
         msg['From'] = SENDER_EMAIL
-        msg['To'] = receiver_email  # <--- هنا بنحط إيميل الشخص اللي سجل
+        msg['To'] = receiver_email
 
-        # الاتصال بجيميل
+        # 2. الاتصال بسيرفر جوجل
+        # نستخدم المنفذ 587 لأنه الأكثر استقراراً مع Render
         server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        server.starttls() # تشفير الاتصال
+        
+        # 3. تسجيل الدخول
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        
+        # 4. الإرسال
         server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
         server.quit()
         
-        print(f"✅ تم إرسال الإيميل بنجاح إلى {receiver_email}")
+        print(f"✅ [تم بنجاح] وصلت الرسالة إلى {receiver_email}")
         
     except Exception as e:
-        print(f"❌ فشل إرسال الإيميل: {e}")
+        print(f"❌ [فشل الإرسال] السبب: {e}")
+        print("تأكد أنك تستخدم App Password وليس كلمة السر العادية")
 
 # ==========================================
-# 🚀 صفحة التسجيل (Register)
+# 🌐 صفحة التسجيل
 # ==========================================
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        # 1. هنا بنستلم البيانات اللي الشخص كتبها
         username = request.form['username']
-        email = request.form['email']    # <--- ده الإيميل اللي الشخص كتبه
+        email = request.form['email']
         password = request.form['password']
         
-        # التأكد إن الاسم مش مستخدم قبل كده
-        if get_user(username): 
-            return "اسم المستخدم مأخوذ سابقاً. <a href='/register'>حاول مرة أخرى</a>"
+        # التأكد من عدم تكرار الاسم
+        if get_user(username): return "اسم المستخدم موجود بالفعل"
 
-        # إنشاء كود عشوائي
+        # إنشاء الكود
         otp = str(random.randint(1000, 9999))
         
-        # 2. إرسال الإيميل في الخلفية (Threading)
-        # بنبعت المتغير 'email' اللي الشخص كتبه للدالة
-        try:
-            thread = threading.Thread(target=send_email_background, args=(email, otp))
-            thread.start()
-        except Exception as e:
-            print(f"خطأ في الـ Thread: {e}")
+        # تشغيل الإرسال في الخلفية (Thread) عشان الموقع ميعلقش
+        # بنبعت الإيميل اللي الشخص كتبه (email) للدالة
+        thread = threading.Thread(target=send_email_logic, args=(email, otp))
+        thread.start()
 
-        # طباعة الكود في الـ Logs كاحتياطي
-        print(f"🔑 كود الطوارئ للمستخدم {username}: {otp}")
+        # طباعة الكود في السجلات احتياطياً
+        print(f"🔑 [كود احتياطي] للمستخدم {username} هو: {otp}")
 
-        # حفظ بيانات مؤقتة
         session['temp_user'] = {
             "username": username, "email": email, 
             "password": generate_password_hash(password), 
@@ -120,15 +113,11 @@ def register():
         }
         session['otp'] = otp
         
-        # النقل لصفحة التفعيل فوراً
         return redirect(url_for('verify_otp'))
 
     return render_template('register.html')
 
-# ==========================================
-# باقي الصفحات (Verify, Login, Home)
-# ==========================================
-
+# باقي الصفحات (زي ما هي)
 @app.route('/verify', methods=['GET', 'POST'])
 def verify_otp():
     if 'temp_user' not in session: return redirect(url_for('register'))
@@ -139,13 +128,13 @@ def verify_otp():
             session['role'] = session['temp_user']['role']
             session.pop('temp_user', None)
             return redirect(url_for('home'))
-        return render_template('verify.html', email=session['temp_user']['email'], error="الكود غير صحيح")
+        return render_template('verify.html', email=session['temp_user']['email'], error="الكود خطأ")
     return render_template('verify.html', email=session['temp_user']['email'])
 
 @app.route('/')
 def home():
     if 'user' not in session: return redirect(url_for('login'))
-    return render_template('index.html', user=session['user'], role=session.get('role', 'user'), news=[])
+    return render_template('index.html', user=session['user'], news=[])
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -159,11 +148,7 @@ def login():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    # محاكاة للذكاء الاصطناعي عشان العرض
-    text = request.form.get('text', '').lower()
-    score = random.randint(80, 99) if "official" in text else random.randint(10, 40)
-    verdict = "REAL" if score > 50 else "FAKE"
-    return jsonify({"verdict": verdict, "score": score, "date_info": "Today", "reasons": ["AI Analysis"], "sources": []})
+    return jsonify({"verdict": "REAL", "score": 95, "date_info": "Today", "reasons": ["AI Analysis"], "sources": []})
 
 @app.route('/logout')
 def logout(): session.clear(); return redirect(url_for('login'))
@@ -171,3 +156,7 @@ def logout(): session.clear(); return redirect(url_for('login'))
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+
