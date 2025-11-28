@@ -6,35 +6,72 @@
     <title>Register</title>
 </head>
 <body class="bg-gray-900 text-white flex items-center justify-center h-screen font-sans">
+    
     <div class="bg-gray-800 p-10 rounded-xl shadow-2xl w-96 border border-gray-700">
-        <h2 class="text-3xl font-bold mb-6 text-center text-blue-500">Create Account</h2>
+        
+        <h2 class="text-3xl font-bold mb-6 text-center text-blue-500">
+            Create Account
+        </h2>
+
         <form method="POST" action="/register">
-            
+
             <!-- Username -->
             <div class="mb-4">
                 <label class="block text-gray-400 text-sm mb-2">Username</label>
-                <input type="text" name="username" required class="w-full p-3 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 outline-none">
+                <input 
+                    type="text" 
+                    name="username" 
+                    required 
+                    placeholder="Enter username"
+                    class="w-full p-3 rounded bg-gray-900 border border-gray-600 
+                           focus:border-blue-500 outline-none"
+                >
             </div>
 
-            <!-- NEW: Email Field -->
+            <!-- Email -->
             <div class="mb-4">
                 <label class="block text-gray-400 text-sm mb-2">Email Address (Gmail)</label>
-                <input type="email" name="email" required placeholder="example@gmail.com" class="w-full p-3 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 outline-none">
+                <input 
+                    type="email" 
+                    name="email" 
+                    required 
+                    placeholder="example@gmail.com"
+                    class="w-full p-3 rounded bg-gray-900 border border-gray-600 
+                           focus:border-blue-500 outline-none"
+                >
             </div>
-            
+
             <!-- Password -->
             <div class="mb-6">
                 <label class="block text-gray-400 text-sm mb-2">Password</label>
-                <input type="password" name="password" required class="w-full p-3 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 outline-none">
+                <input 
+                    type="password" 
+                    name="password" 
+                    required 
+                    placeholder="Enter password"
+                    class="w-full p-3 rounded bg-gray-900 border border-gray-600 
+                           focus:border-blue-500 outline-none"
+                >
             </div>
-            
-            <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-500 transition shadow-lg">
+
+            <!-- Submit Button -->
+            <button 
+                type="submit" 
+                class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold 
+                       hover:bg-blue-500 transition shadow-lg">
                 Next: Verify Email ➜
             </button>
+
         </form>
+
         <p class="mt-6 text-center text-gray-400 text-sm">
-            Has account? <a href="/login" class="text-blue-400 hover:text-blue-300 font-bold">Login</a>
+            Have an account? 
+            <a href="/login" class="text-blue-400 hover:text-blue-300 font-bold">
+                Login
+            </a>
         </p>
+
     </div>
+
 </body>
 </html>
