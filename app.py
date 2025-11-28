@@ -157,11 +157,21 @@ def register():
         email = request.form['email']
         password = request.form['password']
         
-        if get_user(username):
-            return "Username taken!"
+        # Check if user exists
+        if get_user(username): 
+            return "Username taken"
 
         otp = str(random.randint(1000, 9999))
-        send_verification_email(email, otp)
+        
+        # --- MODIFIED: Try to send email, but don't crash if it fails ---
+        try:
+            send_verification_email(email, otp)
+        except Exception as e:
+            print(f"❌ EMAIL FAILED: {e}") 
+            # We continue anyway so the app doesn't crash!
+
+        # Print OTP to logs so you can see it in Render Dashboard if email fails
+        print(f"🔑 MANUAL OTP FOR {username}: {otp}")
         
         session['temp_user'] = {
             "username": username, "email": email, 
@@ -172,7 +182,6 @@ def register():
         return redirect(url_for('verify_otp'))
 
     return render_template('register.html')
-
 @app.route('/verify', methods=['GET', 'POST'])
 def verify_otp():
     if 'temp_user' not in session: return redirect(url_for('register'))
