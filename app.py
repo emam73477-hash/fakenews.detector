@@ -3,7 +3,7 @@ import json
 import random
 import datetime
 import smtplib
-import threading  # <--- The Secret to making it work on Render
+import threading  # <--- مهم جداً عشان الموقع ميهنجش
 from email.mime.text import MIMEText
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -11,21 +11,22 @@ from werkzeug.security import check_password_hash, generate_password_hash
 app = Flask(__name__)
 
 # ==========================================
-# 🔐 CONFIGURATION
+# 🔐 الإعدادات (مهمة جداً)
 # ==========================================
-app.secret_key = os.environ.get("SECRET_KEY", "local_secret")
+app.secret_key = os.environ.get("SECRET_KEY", "any_secret_key_for_testing")
 
-# GET EMAIL KEYS FROM RENDER SETTINGS
+# هنا بنجيب إيميلك أنت (المرسل) من إعدادات Render
+# عشان نقدر نبعت منه رسالة للمستخدم
 SENDER_EMAIL = os.environ.get("MAIL_USERNAME")
 SENDER_PASSWORD = os.environ.get("MAIL_PASSWORD")
 
-# DATABASE SETUP
+# إعداد قاعدة البيانات
 DB_FILE = "local_db.json"
 
 def load_db():
     if not os.path.exists(DB_FILE): return {"users": [], "news": []}
-    try: 
-        with open(DB_FILE, 'r') as f: return json.load(f)
+    try:
+         with open(DB_FILE, 'r') as f: return json.load(f)
     except: return {"users": [], "news": []}
 
 def save_db(data):
@@ -47,67 +48,71 @@ def create_user(user_data):
     return True
 
 # ==========================================
-# 📨 THE REAL EMAIL SENDER (Background Worker)
+# 📨 دالة إرسال الإيميل (في الخلفية)
 # ==========================================
 def send_email_background(receiver_email, otp):
     """
-    This runs in the background. 
-    It connects to Gmail and sends the REAL email.
+    هذه الدالة تأخذ إيميل المستخدم (receiver_email) 
+    وتبعت له الكود باستخدام إيميلك أنت (SENDER_EMAIL)
     """
     try:
-        print(f"🔄 Connecting to Gmail to send to {receiver_email}...")
+        print(f"🔄 جاري الاتصال بسيرفر جوجل للإرسال إلى: {receiver_email}...")
         
-        # Check if password is set
         if not SENDER_EMAIL or not SENDER_PASSWORD:
-            print("❌ ERROR: Email/Password not set in Render Environment Variables!")
+            print("❌ خطأ: لم يتم وضع إيميل المرسل في إعدادات Render")
             return
 
-        msg = MIMEText(f"Hello,\n\nYour Verification Code is: {otp}\n\nGood luck with the competition!\n\n- YUVAi Team")
-        msg['Subject'] = "YUVAi Verification Code"
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = receiver_email
+        # محتوى الرسالة
+        subject = "كود التفعيل الخاص بك - YUVAi"
+        body = f"مرحباً،\n\nكود التفعيل الخاص بك هو: {otp}\n\nنتمنى لك التوفيق في المسابقة!\n\nفريق YUVAi"
 
-        # Connect to Gmail Server (Standard Port 587)
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = receiver_email  # <--- هنا بنحط إيميل الشخص اللي سجل
+
+        # الاتصال بجيميل
         server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls() # Secure the connection
+        server.starttls()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
         server.quit()
         
-        print(f"✅ EMAIL SENT SUCCESSFULLY to {receiver_email}!")
+        print(f"✅ تم إرسال الإيميل بنجاح إلى {receiver_email}")
         
     except Exception as e:
-        print(f"❌ EMAIL FAILED: {e}")
-        print("Check that your App Password is correct and Environment Variables are set.")
+        print(f"❌ فشل إرسال الإيميل: {e}")
 
 # ==========================================
-# 🚀 ROUTES
+# 🚀 صفحة التسجيل (Register)
 # ==========================================
-
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
+        # 1. هنا بنستلم البيانات اللي الشخص كتبها
         username = request.form['username']
-        email = request.form['email']
+        email = request.form['email']    # <--- ده الإيميل اللي الشخص كتبه
         password = request.form['password']
         
+        # التأكد إن الاسم مش مستخدم قبل كده
         if get_user(username): 
-            return "Username taken. <a href='/register'>Try again</a>"
+            return "اسم المستخدم مأخوذ سابقاً. <a href='/register'>حاول مرة أخرى</a>"
 
+        # إنشاء كود عشوائي
         otp = str(random.randint(1000, 9999))
         
-        # --- SEND EMAIL IN BACKGROUND ---
-        # This prevents the "CRITICAL WORKER TIMEOUT" error
-        # The user goes to the next page INSTANTLY, while the email sends in the background.
+        # 2. إرسال الإيميل في الخلفية (Threading)
+        # بنبعت المتغير 'email' اللي الشخص كتبه للدالة
         try:
             thread = threading.Thread(target=send_email_background, args=(email, otp))
             thread.start()
         except Exception as e:
-            print(f"Thread Error: {e}")
+            print(f"خطأ في الـ Thread: {e}")
 
-        # Always print to logs as backup
-        print(f"🔑 BACKUP OTP FOR {username}: {otp}")
+        # طباعة الكود في الـ Logs كاحتياطي
+        print(f"🔑 كود الطوارئ للمستخدم {username}: {otp}")
 
+        # حفظ بيانات مؤقتة
         session['temp_user'] = {
             "username": username, "email": email, 
             "password": generate_password_hash(password), 
@@ -115,10 +120,14 @@ def register():
         }
         session['otp'] = otp
         
-        # Go to verify page immediately
+        # النقل لصفحة التفعيل فوراً
         return redirect(url_for('verify_otp'))
 
     return render_template('register.html')
+
+# ==========================================
+# باقي الصفحات (Verify, Login, Home)
+# ==========================================
 
 @app.route('/verify', methods=['GET', 'POST'])
 def verify_otp():
@@ -130,7 +139,7 @@ def verify_otp():
             session['role'] = session['temp_user']['role']
             session.pop('temp_user', None)
             return redirect(url_for('home'))
-        return render_template('verify.html', email=session['temp_user']['email'], error="Wrong Code")
+        return render_template('verify.html', email=session['temp_user']['email'], error="الكود غير صحيح")
     return render_template('verify.html', email=session['temp_user']['email'])
 
 @app.route('/')
@@ -145,14 +154,16 @@ def login():
         if user and check_password_hash(user['password'], request.form['password']):
             session['user'] = user['username']; session['role'] = user['role']
             return redirect(url_for('home'))
-        return render_template('login.html', error="Invalid Credentials")
+        return render_template('login.html', error="بيانات خاطئة")
     return render_template('login.html')
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
+    # محاكاة للذكاء الاصطناعي عشان العرض
     text = request.form.get('text', '').lower()
     score = random.randint(80, 99) if "official" in text else random.randint(10, 40)
-    return jsonify({"verdict": "REAL" if score > 50 else "FAKE", "score": score, "date_info": "Today", "reasons": ["AI Analysis"], "sources": []})
+    verdict = "REAL" if score > 50 else "FAKE"
+    return jsonify({"verdict": verdict, "score": score, "date_info": "Today", "reasons": ["AI Analysis"], "sources": []})
 
 @app.route('/logout')
 def logout(): session.clear(); return redirect(url_for('login'))
