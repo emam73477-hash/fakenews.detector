@@ -22,7 +22,8 @@ DB_FILE = "local_db.json"
 
 def load_db():
     if not os.path.exists(DB_FILE): return {"users": [], "news": []}
-    try: with open(DB_FILE, 'r') as f: return json.load(f)
+    try: 
+        with open(DB_FILE, 'r') as f: return json.load(f)
     except: return {"users": [], "news": []}
 
 def save_db(data):
@@ -153,9 +154,6 @@ def analyze():
 @app.route('/logout')
 def logout(): session.clear(); return redirect(url_for('login'))
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
