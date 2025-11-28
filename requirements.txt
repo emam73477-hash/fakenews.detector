@@ -1,4 +1,6 @@
-flask
 requests
-newspaper3k
+flask
+gunicorn
+werkzeug
 python-dotenv
+
