@@ -1,0 +1,4 @@
+flask
+requests
+newspaper3k
+python-dotenv

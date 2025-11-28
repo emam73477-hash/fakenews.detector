@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analysis Result</title>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(to right, #f0f4f8, #d9e2ec);
+            padding: 40px 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #1b3b5f;
+            margin-bottom: 30px;
+        }
+        .box {
+            width: 100%;
+            max-width: 600px;
+            background: white;
+            margin: auto;
+            padding: 35px 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .box:hover {
+            transform: translateY(-3px);
+        }
+        h3 {
+            color: #1b3b5f;
+            font-weight: 500;
+            line-height: 1.6;
+        }
+        a {
+            display: inline-block;
+            margin-top: 25px;
+            padding: 12px 25px;
+            background: #1d4ed8;
+            color: white;
+            border-radius: 12px;
+            text-decoration: none;
+            font-size: 16px;
+            transition: background 0.3s, transform 0.2s;
+        }
+        a:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Analysis Result</h1>
+
+    <div class="box">
+        <h3>{{ prediction_text|safe }}</h3>
+
+        <a href="/">Back to Home</a>
+    </div>
+</body>
+</html>
