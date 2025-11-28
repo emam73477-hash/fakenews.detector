@@ -3,19 +3,23 @@ import json
 import random
 import datetime
 import smtplib
+import threading  # <--- The Secret to making it work on Render
 from email.mime.text import MIMEText
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
-import threading  # <--- NEW IMPORT FOR SPEED
 
 app = Flask(__name__)
 
-# SECURITY
-app.secret_key = os.environ.get("SECRET_KEY", "local_secret_key")
-SENDER_EMAIL = os.environ.get("MAIL_USERNAME", "your_email@gmail.com")
-SENDER_PASSWORD = os.environ.get("MAIL_PASSWORD", "your_app_password")
+# ==========================================
+# 🔐 CONFIGURATION
+# ==========================================
+app.secret_key = os.environ.get("SECRET_KEY", "local_secret")
 
-# DATABASE
+# GET EMAIL KEYS FROM RENDER SETTINGS
+SENDER_EMAIL = os.environ.get("MAIL_USERNAME")
+SENDER_PASSWORD = os.environ.get("MAIL_PASSWORD")
+
+# DATABASE SETUP
 DB_FILE = "local_db.json"
 
 def load_db():
@@ -43,31 +47,43 @@ def create_user(user_data):
     return True
 
 # ==========================================
-# ⚡ FAST EMAIL SENDER (Background)
+# 📨 THE REAL EMAIL SENDER (Background Worker)
 # ==========================================
-def send_async_email(receiver_email, otp):
-    """Sends email in the background so the site doesn't freeze"""
+def send_email_background(receiver_email, otp):
+    """
+    This runs in the background. 
+    It connects to Gmail and sends the REAL email.
+    """
     try:
-        print(f"🔄 Background: Sending email to {receiver_email}...")
+        print(f"🔄 Connecting to Gmail to send to {receiver_email}...")
         
-        msg = MIMEText(f"Your YUVAi Verification Code is: {otp}")
-        msg['Subject'] = "YUVAi Verification"
+        # Check if password is set
+        if not SENDER_EMAIL or not SENDER_PASSWORD:
+            print("❌ ERROR: Email/Password not set in Render Environment Variables!")
+            return
+
+        msg = MIMEText(f"Hello,\n\nYour Verification Code is: {otp}\n\nGood luck with the competition!\n\n- YUVAi Team")
+        msg['Subject'] = "YUVAi Verification Code"
         msg['From'] = SENDER_EMAIL
         msg['To'] = receiver_email
 
-        # USE PORT 465 (SSL) - It is faster and more secure than 587
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # Connect to Gmail Server (Standard Port 587)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls() # Secure the connection
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
         server.quit()
         
-        print(f"✅ Email Sent to {receiver_email}!")
+        print(f"✅ EMAIL SENT SUCCESSFULLY to {receiver_email}!")
+        
     except Exception as e:
-        print(f"❌ Background Email Failed: {e}")
+        print(f"❌ EMAIL FAILED: {e}")
+        print("Check that your App Password is correct and Environment Variables are set.")
 
 # ==========================================
-# 🚀 REGISTER ROUTE
+# 🚀 ROUTES
 # ==========================================
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -75,31 +91,48 @@ def register():
         email = request.form['email']
         password = request.form['password']
         
-        if get_user(username): return "Username taken"
-        
+        if get_user(username): 
+            return "Username taken. <a href='/register'>Try again</a>"
+
         otp = str(random.randint(1000, 9999))
         
-        # --- THE MAGIC TRICK ---
-        # We start a separate "thread" to send the email.
-        # The code below runs INSTANTLY without waiting for Gmail.
-        email_thread = threading.Thread(target=send_async_email, args=(email, otp))
-        email_thread.start()
-        
-        # Backup: Print to logs just in case
-        print(f"🔑 OTP generated for {username}: {otp}")
+        # --- SEND EMAIL IN BACKGROUND ---
+        # This prevents the "CRITICAL WORKER TIMEOUT" error
+        # The user goes to the next page INSTANTLY, while the email sends in the background.
+        try:
+            thread = threading.Thread(target=send_email_background, args=(email, otp))
+            thread.start()
+        except Exception as e:
+            print(f"Thread Error: {e}")
+
+        # Always print to logs as backup
+        print(f"🔑 BACKUP OTP FOR {username}: {otp}")
 
         session['temp_user'] = {
             "username": username, "email": email, 
-            "password": generate_password_hash(password), "role": "user"
+            "password": generate_password_hash(password), 
+            "role": "user"
         }
         session['otp'] = otp
         
-        # User is redirected IMMEDIATELY. No waiting.
+        # Go to verify page immediately
         return redirect(url_for('verify_otp'))
 
     return render_template('register.html')
 
-# --- OTHER ROUTES ---
+@app.route('/verify', methods=['GET', 'POST'])
+def verify_otp():
+    if 'temp_user' not in session: return redirect(url_for('register'))
+    if request.method == 'POST':
+        if request.form['otp'] == session.get('otp'):
+            create_user(session['temp_user'])
+            session['user'] = session['temp_user']['username']
+            session['role'] = session['temp_user']['role']
+            session.pop('temp_user', None)
+            return redirect(url_for('home'))
+        return render_template('verify.html', email=session['temp_user']['email'], error="Wrong Code")
+    return render_template('verify.html', email=session['temp_user']['email'])
+
 @app.route('/')
 def home():
     if 'user' not in session: return redirect(url_for('login'))
@@ -114,18 +147,6 @@ def login():
             return redirect(url_for('home'))
         return render_template('login.html', error="Invalid Credentials")
     return render_template('login.html')
-
-@app.route('/verify', methods=['GET', 'POST'])
-def verify_otp():
-    if 'temp_user' not in session: return redirect(url_for('register'))
-    if request.method == 'POST':
-        if request.form['otp'] == session.get('otp'):
-            create_user(session['temp_user'])
-            session['user'] = session['temp_user']['username']; session['role'] = session['temp_user']['role']
-            session.pop('temp_user', None)
-            return redirect(url_for('home'))
-        return render_template('verify.html', email=session['temp_user']['email'], error="Wrong Code")
-    return render_template('verify.html', email=session['temp_user']['email'])
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
