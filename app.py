@@ -12,7 +12,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "competition_secret")
 
 # ==========================================
-# 📨 إعدادات الإيميل (من Render)
+# 📨 إعدادات الإيميل
 # ==========================================
 SENDER_EMAIL = os.environ.get("MAIL_USERNAME")
 SENDER_PASSWORD = os.environ.get("MAIL_PASSWORD")
@@ -45,43 +45,41 @@ def create_user(user_data):
     return True
 
 # ==========================================
-# 🚀 دالة الإرسال (تعمل في الخلفية)
+# 🚀 دالة الإرسال المحدثة (FIXED)
 # ==========================================
 def send_email_logic(receiver_email, otp):
-    """
-    هذه الدالة هي المسؤولة عن إرسال الإيميل فعلياً
-    """
-    print(f"\n🔄 [بدء الإرسال] محاولة إرسال كود {otp} إلى الإيميل: {receiver_email}")
+    print(f"\n🔄 [بدء الإرسال] محاولة إرسال كود {otp} إلى: {receiver_email}")
     
-    # 1. التأكد من وجود إيميل المرسل
     if not SENDER_EMAIL or not SENDER_PASSWORD:
-        print("❌ [خطأ] لم يتم ضبط إيميل المرسل في إعدادات Render!")
+        print("❌ [خطأ] متغيرات البيئة (MAIL_USERNAME / MAIL_PASSWORD) غير موجودة!")
         return
 
-    try:
-        # إعداد الرسالة
-        msg = MIMEText(f"مرحباً،\nكود التفعيل الخاص بك في YUVAi هو: {otp}\n\nبالتوفيق!")
-        msg['Subject'] = "كود تفعيل الحساب"
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = receiver_email
+    msg = MIMEText(f"مرحباً،\nكود التفعيل الخاص بك هو: {otp}\n\nشكراً لك.")
+    msg['Subject'] = "Verification Code"
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = receiver_email
 
-        # 2. الاتصال بسيرفر جوجل
-        # نستخدم المنفذ 587 لأنه الأكثر استقراراً مع Render
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls() # تشفير الاتصال
+    try:
+        # 🔥 التغيير الرئيسي هنا: استخدام SMTP_SSL ومنفذ 465
+        # هذا يحل مشكلة Network unreachable في أغلب الأحيان
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
         
-        # 3. تسجيل الدخول
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        
-        # 4. الإرسال
-        server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
-        server.quit()
-        
-        print(f"✅ [تم بنجاح] وصلت الرسالة إلى {receiver_email}")
+        print(f"✅ [نجاح] تم إرسال الإيميل إلى {receiver_email}")
         
     except Exception as e:
         print(f"❌ [فشل الإرسال] السبب: {e}")
-        print("تأكد أنك تستخدم App Password وليس كلمة السر العادية")
+        # محاولة بديلة باستخدام المنفذ 587 إذا فشل 465
+        try:
+            print("🔄 محاولة بديلة عبر المنفذ 587...")
+            with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                server.starttls()
+                server.login(SENDER_EMAIL, SENDER_PASSWORD)
+                server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
+            print("✅ [نجاح] تم الإرسال عبر المحاولة البديلة.")
+        except Exception as e2:
+             print(f"❌ [فشل نهائي] لم ينجح أي منفذ. الخطأ: {e2}")
 
 # ==========================================
 # 🌐 صفحة التسجيل
@@ -93,22 +91,20 @@ def register():
         email = request.form['email']
         password = request.form['password']
         
-        # التأكد من عدم تكرار الاسم
-        if get_user(username): return "اسم المستخدم موجود بالفعل"
+        if get_user(username): 
+            return "اسم المستخدم موجود بالفعل"
 
-        # إنشاء الكود
         otp = str(random.randint(1000, 9999))
         
-        # تشغيل الإرسال في الخلفية (Thread) عشان الموقع ميعلقش
-        # بنبعت الإيميل اللي الشخص كتبه (email) للدالة
+        # تشغيل الإرسال في الخلفية
         thread = threading.Thread(target=send_email_logic, args=(email, otp))
         thread.start()
 
-        # طباعة الكود في السجلات احتياطياً
         print(f"🔑 [كود احتياطي] للمستخدم {username} هو: {otp}")
 
         session['temp_user'] = {
-            "username": username, "email": email, 
+            "username": username, 
+            "email": email, 
             "password": generate_password_hash(password), 
             "role": "user"
         }
@@ -118,16 +114,20 @@ def register():
 
     return render_template('register.html')
 
-# باقي الصفحات (زي ما هي)
+# ==========================================
+# باقي الكود (كما هو)
+# ==========================================
 @app.route('/verify', methods=['GET', 'POST'])
 def verify_otp():
     if 'temp_user' not in session: return redirect(url_for('register'))
     if request.method == 'POST':
-        if request.form['otp'] == session.get('otp'):
+        user_otp = request.form.get('otp', '').strip()
+        if user_otp == session.get('otp'):
             create_user(session['temp_user'])
             session['user'] = session['temp_user']['username']
             session['role'] = session['temp_user']['role']
             session.pop('temp_user', None)
+            session.pop('otp', None)
             return redirect(url_for('home'))
         return render_template('verify.html', email=session['temp_user']['email'], error="الكود خطأ")
     return render_template('verify.html', email=session['temp_user']['email'])
@@ -157,4 +157,3 @@ def logout(): session.clear(); return redirect(url_for('login'))
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
