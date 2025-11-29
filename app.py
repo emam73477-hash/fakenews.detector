@@ -13,22 +13,28 @@ app.secret_key = os.environ.get("SECRET_KEY", "competition_secret")
 # ==========================================
 # 🔑 API KEYS (Set these in Render Env Vars)
 # ==========================================
-# 1. Email Config (Brevo)
 BREVO_API_KEY = os.environ.get("MAIL_PASSWORD") 
 SENDER_EMAIL = os.environ.get("MAIL_USERNAME")
-
-# 2. Search Config (Serper.dev)
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "YOUR_SERPER_KEY_HERE")
 
-# List of Global Trusted Sources
+# ==========================================
+# 🌍 Updated Trusted Sources (English + Arabic)
+# ==========================================
 TRUSTED_SOURCES = [
+    # English Global
     "reuters.com", "bbc.com", "cnn.com", "aljazeera.com", "apnews.com",
-    "nytimes.com", "washingtonpost.com", "theguardian.com", "who.int", "bloomberg.com"
+    "nytimes.com", "washingtonpost.com", "theguardian.com", "who.int", "bloomberg.com",
+    # Arabic / Regional
+    "aljazeera.net", "alarabiya.net", "skynewsarabia.com", "youm7.com", 
+    "masrawy.com", "shorouknews.com", "independentarabia.com", "bbc.com/arabic"
 ]
 
-# List of Fact Checking Sites
+# Updated Fact Checkers
 FACT_CHECKERS = [
-    "snopes.com", "politifact.com", "factcheck.org", "fullfact.org"
+    # English
+    "snopes.com", "politifact.com", "factcheck.org", "fullfact.org",
+    # Arabic
+    "fatabyyano.net", "misbar.com", "dabegad.com"
 ]
 
 # ==========================================
@@ -38,7 +44,8 @@ DB_FILE = "local_db.json"
 
 def load_db():
     if not os.path.exists(DB_FILE): return {"users": [], "news": []}
-    try: with open(DB_FILE, 'r') as f: return json.load(f)
+    try: 
+        with open(DB_FILE, 'r') as f: return json.load(f)
     except: return {"users": [], "news": []}
 
 def save_db(data):
@@ -60,7 +67,7 @@ def create_user(user_data):
     return True
 
 # ==========================================
-# 📧 Email Logic (HTTP API - Safe for Render)
+# 📧 Email Logic
 # ==========================================
 def send_email_logic(receiver_email, otp):
     if not SENDER_EMAIL or not BREVO_API_KEY:
@@ -76,12 +83,12 @@ def send_email_logic(receiver_email, otp):
     payload = {
         "sender": {"name": "FakeNews Detector", "email": SENDER_EMAIL},
         "to": [{"email": receiver_email}],
-        "subject": "Your Verification Code",
+        "subject": "Verification Code / كود التفعيل",
         "htmlContent": f"""
-        <div style='font-family: Arial; padding: 20px;'>
-            <h2>Welcome!</h2>
+        <div style='font-family: Arial; padding: 20px; text-align: center;'>
+            <h2>Welcome! / مرحباً</h2>
             <p>Your activation code is:</p>
-            <h1 style='color: #2563eb;'>{otp}</h1>
+            <h1 style='color: #2563eb; font-size: 30px;'>{otp}</h1>
         </div>
         """
     }
@@ -92,15 +99,42 @@ def send_email_logic(receiver_email, otp):
         print(f"❌ Email Error: {e}")
 
 # ==========================================
-# 🧠 AI Core: News Analysis Logic
+# 🧠 AI Core: Multi-Language News Analysis
 # ==========================================
-def analyze_news_logic(text):
+def analyze_news_logic(text, lang="en"):
     """
-    Searches Google for the text and analyzes credibility.
+    Searches Google and returns results in the requested language (en or ar).
     """
     url = "https://google.serper.dev/search"
-    # q=query, gl=country(us), hl=language(en)
-    payload = json.dumps({"q": text, "gl": "us", "hl": "en"}) 
+    
+    # 🌍 1. Configure Search Region & Language
+    if lang == 'ar':
+        # Search in Egypt (eg) with Arabic language (ar)
+        payload = json.dumps({"q": text, "gl": "eg", "hl": "ar"})
+        
+        # Arabic UI Labels
+        LBL_REAL = "خبر حقيقي"
+        LBL_FAKE = "خبر زائف"
+        LBL_UNSURE = "غير مؤكد"
+        LBL_DATE = "أول ظهور للخبر: "
+        LBL_NO_RES = "لم يتم العثور على نتائج."
+        LBL_TRUSTED = "تم التأكيد عبر مصدر موثوق: "
+        LBL_FACT = "تم تصنيفه بواسطة مدقق حقائق: "
+        FAKE_KEYWORDS = ["كاذب", "زائف", "شائعة", "غير صحيح", "خاطئ", "مفبرك"]
+    else:
+        # Search in US (us) with English language (en)
+        payload = json.dumps({"q": text, "gl": "us", "hl": "en"})
+        
+        # English UI Labels
+        LBL_REAL = "REAL"
+        LBL_FAKE = "FAKE"
+        LBL_UNSURE = "UNVERIFIED"
+        LBL_DATE = "First seen: "
+        LBL_NO_RES = "No search results found."
+        LBL_TRUSTED = "Confirmed by trusted source: "
+        LBL_FACT = "Flagged by fact checker: "
+        FAKE_KEYWORDS = ["false", "fake", "hoax", "scam", "myth", "debunked"]
+
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
 
     try:
@@ -109,65 +143,64 @@ def analyze_news_logic(text):
         
         organic_results = data.get("organic", [])
         
-        verdict = "UNVERIFIED"
-        score = 50 # Base score
+        verdict = LBL_UNSURE
+        score = 50 
         found_sources = []
         reasons = []
-        date_info = "Date unavailable"
+        date_info = "Date unavailable" if lang == 'en' else "التاريخ غير متوفر"
 
-        # No results found?
         if not organic_results:
             return {
-                "verdict": "FAKE",
+                "verdict": LBL_FAKE,
                 "score": 0,
                 "date_info": "N/A",
-                "reasons": ["No search results found for this headline."],
+                "reasons": [LBL_NO_RES],
                 "sources": []
             }
 
-        # Analyze Results
+        # 🧠 2. Analyze Results
         for result in organic_results:
             link = result.get("link", "")
             title = result.get("title", "")
             date = result.get("date", "")
             
-            # 1. Capture the date of the first result
-            if date and date_info == "Date unavailable":
-                date_info = f"First seen: {date}"
+            # Capture date
+            if date and (date_info.startswith("Date") or date_info.startswith("التاريخ")):
+                date_info = f"{LBL_DATE}{date}"
 
-            # 2. Check Trusted Sources (+ Score)
+            # Check Trusted Sources
             for trusted in TRUSTED_SOURCES:
                 if trusted in link:
                     score += 20
-                    reasons.append(f"Confirmed by trusted source: {trusted}")
-                    found_sources.append({"title": title, "link": link, "type": "Trusted ✅"})
+                    reasons.append(f"{LBL_TRUSTED}{trusted}")
+                    found_sources.append({"title": title, "link": link, "type": "Trusted"})
 
-            # 3. Check Fact Checkers (- Score)
+            # Check Fact Checkers
             for checker in FACT_CHECKERS:
                 if checker in link:
-                    # If a fact checker wrote about it, it's usually to debunk it,
-                    # but we check the title for keywords like 'False' or 'Hoax'.
-                    score -= 10 
-                    found_sources.append({"title": title, "link": link, "type": "Fact Check ⚖️"})
-                    if any(x in title.lower() for x in ["false", "fake", "hoax", "scam", "myth"]):
+                    score -= 20
+                    found_sources.append({"title": title, "link": link, "type": "Fact Check"})
+                    
+                    # Check title for negative keywords
+                    if any(k in title.lower() for k in FAKE_KEYWORDS):
                         score = 10
-                        verdict = "FAKE"
-                        reasons.append(f"Debunked by {checker}")
+                        verdict = LBL_FAKE
+                        reasons.append(f"{LBL_FACT}{checker}")
 
-        # Final Decision
+        # ⚖️ 3. Final Verdict
         if score >= 80:
-            verdict = "REAL"
+            verdict = LBL_REAL
         elif score <= 30:
-            verdict = "FAKE"
+            verdict = LBL_FAKE
         else:
-            verdict = "UNSURE"
+            verdict = LBL_UNSURE
 
         return {
             "verdict": verdict,
             "score": min(score, 100),
             "date_info": date_info,
-            "reasons": list(set(reasons)), # Remove duplicates
-            "sources": found_sources[:5]   # Top 5 sources
+            "reasons": list(set(reasons)),
+            "sources": found_sources[:5]
         }
 
     except Exception as e:
@@ -184,14 +217,17 @@ def analyze():
     
     data = request.get_json()
     news_text = data.get('text', '')
+    # 🔥 Get Language from Frontend (default to English)
+    lang = data.get('lang', 'en') 
     
     if not news_text:
-        return jsonify({"error": "Please enter text"}), 400
+        return jsonify({"error": "Empty text"}), 400
         
-    result = analyze_news_logic(news_text)
+    # Pass language to logic function
+    result = analyze_news_logic(news_text, lang)
     return jsonify(result)
 
-# --- Auth Routes (Same as before, just English) ---
+# --- Auth Routes ---
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -200,16 +236,14 @@ def register():
         email = request.form['email']
         password = request.form['password']
         
-        if get_user(username): return "Username already exists"
+        if get_user(username): return "Username exists"
         
         otp = str(random.randint(1000, 9999))
         
-        # Send email in background
         thread = threading.Thread(target=send_email_logic, args=(email, otp))
         thread.start()
 
-        # Log OTP for backup
-        print(f"🔑 [BACKUP OTP] For {email}: {otp}")
+        print(f"🔑 [BACKUP OTP] {email}: {otp}")
 
         session['temp_user'] = {
             "username": username, "email": email, 
@@ -240,13 +274,13 @@ def login():
         if user and check_password_hash(user['password'], request.form['password']):
             session['user'] = user['username']
             return redirect(url_for('home'))
-        return render_template('login.html', error="Invalid Username or Password")
+        return render_template('login.html', error="Invalid Login")
     return render_template('login.html')
 
 @app.route('/')
 def home():
     if 'user' not in session: return redirect(url_for('login'))
-    return render_template('index.html', user=session['user'])
+    return render_template('index.html', user=session['user'], news=[])
 
 @app.route('/logout')
 def logout(): session.clear(); return redirect(url_for('login'))
