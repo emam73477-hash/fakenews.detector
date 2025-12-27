@@ -1,36 +1,20 @@
+import os
 from pymongo import MongoClient
-import urllib.parse
-import certifi
 
-# 1. Credentials
-username = urllib.parse.quote_plus("Mohamed")
-password = urllib.parse.quote_plus("@Abohamid.123")
+# 1. الرابط الرسمي (نظيف تماماً كما في تعليمات مونجو)
+# استبدل <password> بكلمة مرورك: Abohamid.123
+MONGO_URI = "mongodb+srv://emammohammed605_db_user:Abohamid.123@cluster0.dumu7fi.mongodb.net/?appName=Cluster0"
 
-# 2. Connection URI
-uri = f"mongodb+srv://{username}:{password}@cluster0.x87bvlf.mongodb.net/news_verification?retryWrites=true&w=majority&appName=Cluster0"
-
-db = None
-users_collection = None
-news_collection = None
-
+# 2. إنشاء الاتصال
 try:
-    print("☁️ Connecting to Cloud Database (MongoDB Atlas)...")
+    client = MongoClient(MONGO_URI)
+    # نحدد قاعدة البيانات والمجموعة
+    db = client["media_db"] 
+    news_collection = db["news"]
     
-    # --- THE FIX IS HERE ---
-    # We added 'tlsDisableOCSPEndpointCheck=True'
-    client = MongoClient(uri, 
-                         tlsCAFile=certifi.where(),
-                         tlsAllowInvalidCertificates=True,
-                         tlsDisableOCSPEndpointCheck=True) 
-    
-    # Test connection
+    # اختبار بسيط للاتصال
     client.admin.command('ping')
-    print("✅ SUCCESS: Connected to Cloud Database!")
-    
-    db = client.news_verification
-    users_collection = db.users
-    news_collection = db.news_articles
-
+    print("✅ تم الاتصال بنجاح باستخدام الطريقة الرسمية!")
 except Exception as e:
-    print("❌ CLOUD ERROR: Could not connect (Running in Offline Mode).")
-    print(f"Details: {e}")
+    print(f"❌ فشل الاتصال: {e}")
+    news_collection = None
