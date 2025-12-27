@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>وسائط مكافحة الشائعات</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .card {
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            width: 300px;
+            padding: 15px;
+        }
+        .card img {
+            width: 100%;
+            border-radius: 8px;
+        }
+        .card h3 {
+            margin: 10px 0 5px;
+        }
+        .card p {
+            margin: 5px 0;
+        }
+        .card .type {
+            font-weight: bold;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+
+<h1>وسائط مكافحة الشائعات</h1>
+<div class="container" id="multimedia-container">
+    <!-- البطاقات هتظهر هنا -->
+</div>
+
+<script>
+    // رابط الـ API بتاعك
+    const API_URL = "http://localhost:5000/multimedia";
+
+    fetch(API_URL)
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById("multimedia-container");
+            data.forEach(item => {
+                const card = document.createElement("div");
+                card.className = "card";
+                card.innerHTML = `
+                    <img src="${item.image}" alt="${item.title}">
+                    <h3>${item.title}</h3>
+                    <p>${item.desc}</p>
+                    <p class="type">نوع الوسيط: ${item.type}</p>
+                `;
+                container.appendChild(card);
+            });
+        })
+        .catch(err => {
+            console.error("فشل تحميل البيانات:", err);
+            document.getElementById("multimedia-container").innerHTML = "<p>حدث خطأ أثناء تحميل البيانات.</p>";
+        });
+</script>
+
+</body>
+</html>
