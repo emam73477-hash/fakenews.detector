@@ -372,9 +372,16 @@
                 alert("Neural Link Failure");
             }
         }
+                    } catch(e) {
+                console.error(e);
+                loader.style.display = "none";
+                alert("Connection Error");
+            }
+        }
     </script>
 </body>
 </html>
+
 
 
 
