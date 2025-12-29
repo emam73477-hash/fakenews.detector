@@ -1,175 +1,186 @@
 import os
 import json
-import random
 import datetime
-import threading
 import requests
 import re
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "competition_secret")
+app.secret_key = os.environ.get("SECRET_KEY", "pro_secret_key_123")
 
 # ==========================================
-# 🔑 API KEYS (تأكد من وضع مفاتيحك هنا)
+# 🔑 الإعدادات والمفاتيح
 # ==========================================
-BREVO_API_KEY = os.environ.get("MAIL_PASSWORD") 
-SENDER_EMAIL = os.environ.get("MAIL_USERNAME")
-SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "YOUR_SERPER_KEY_HERE")
+SERPER_API_KEY = "YOUR_SERPER_KEY_HERE" # ضع مفتاحك هنا
+DB_FILE = "database.json"
 
-# ==========================================
-# 🌍 Trusted Sources & Fact Checkers
-# ==========================================
 TRUSTED_SOURCES = [
-    "reuters.com", "bbc.com", "cnn.com", "aljazeera.com", "apnews.com",
-    "nytimes.com", "washingtonpost.com", "theguardian.com", "who.int",
-    "aljazeera.net", "alarabiya.net", "skynewsarabia.com", "youm7.com", 
-    "masrawy.com", "shorouknews.com", "independentarabia.com"
+    "reuters.com", "bbc.com", "aljazeera.net", "alarabiya.net", 
+    "youm7.com", "skynewsarabia.com", "masrawy.com", "rt.com",
+    "cnn.com", "apnews.com", "kooora.com", "yallakora.com", "filgoal.com"
 ]
 
 FACT_CHECKERS = [
-    "fatabyyano.net", "misbar.com", "dabegad.com", 
-    "snopes.com", "politifact.com", "factcheck.org"
+    "misbar.com", "fatabyyano.net", "dabegad.com", 
+    "snopes.com", "politifact.com", "fullfact.org"
 ]
 
 # ==========================================
-# 🧠 AI Core: تحليل ذكي يكتشف العناوين المضللة
+# 📂 إدارة قاعدة البيانات المصغرة
 # ==========================================
-def analyze_news_logic(text, lang="ar"):
+def load_db():
+    if not os.path.exists(DB_FILE):
+        return {"users": []}
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_db(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+# ==========================================
+# 🧠 محرك التحليل الذكي (القلب النابض)
+# ==========================================
+def deep_analyze_news(text, lang="ar"):
     url = "https://google.serper.dev/search"
+    today = datetime.datetime.now()
     
-    # كلمات النفي التي تظهر في وصف الخبر حتى لو كان العنوان مضلل
-    debunk_signals = {
-        "ar": ["شائعة", "لا صحة", "نفت", "خبر كاذب", "غير صحيح", "ينفي", "توضيح", "حقيقة", "مفبرك"],
-        "en": ["rumor", "false", "denied", "fake news", "not true", "debunked", "clarification", "fact check"]
+    # 1. تحليل الكلمات الزمنية وتحديد فلتر الوقت (Freshness)
+    # qdr:d (آخر يوم), qdr:d2 (آخر يومين), qdr:w (أسبوع)
+    time_filters = {
+        "ar": {"أمس": "qdr:d2", "امس": "qdr:d2", "اليوم": "qdr:d", "عاجل": "qdr:h", "الآن": "qdr:h"},
+        "en": {"yesterday": "qdr:d2", "today": "qdr:d", "urgent": "qdr:h", "now": "qdr:h"}
+    }
+    
+    tbs_value = ""
+    for word, filter_val in time_filters[lang].items():
+        if word in text:
+            tbs_value = filter_val
+            break
+
+    # 2. الكلمات المناقضة (لكشف التضارب: فوز ضد خسارة)
+    opposites = {
+        "خسارة": ["فوز", "انتصار", "تغلب", "فاز", "توج"],
+        "loss": ["win", "victory", "won", "scored"],
+        "وفاة": ["ينفي", "إشاعة", "بصحة جيدة", "بخير", "توضيح"],
+        "death": ["alive", "denies", "healthy", "safe"]
     }
 
-    # تحسين البحث بإضافة كلمة "حقيقة" لضمان ظهور نتائج التحقق
-    search_query = f"{text} حقيقة" if lang == "ar" else f"{text} truth"
-    
-    payload = json.dumps({
-        "q": search_query, 
-        "gl": "eg" if lang=="ar" else "us", 
+    # 3. كلمات النفي (لكشف العناوين المضللة)
+    negation_signals = ["شائعة", "لا صحة", "نفت", "خبر كاذب", "غير صحيح", "ينفي", "مفبرك", "إشاعة", "false", "fake", "rumor"]
+
+    # إعداد البحث
+    query = f"{text} حقيقة" if lang == "ar" else f"{text} truth"
+    payload = {
+        "q": query,
+        "gl": "eg" if lang == "ar" else "us",
         "hl": lang,
-        "num": 8 # زيادة عدد النتائج لدقة أعلى
-    })
+        "num": 8
+    }
+    if tbs_value: payload["tbs"] = tbs_value
+
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
 
     try:
-        response = requests.post(url, headers=headers, data=payload, timeout=10)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         results = response.json().get("organic", [])
 
         if not results:
-            return {"verdict": "⚠️ غير مؤكد", "score": 50, "reasons": ["لم نجد مصادر كافية"]}
+            return {"verdict": "⚠️ غير مؤكد", "score": 50, "reasons": ["لم نجد مصادر رسمية كافية حالياً"]}
 
-        fake_points = 0
-        real_points = 0
+        points = 50 
         reasons = []
-        found_sources = []
-        
-        # تحليل كل نتيجة بحث بعمق
+        contradiction_found = False
+
         for res in results:
             title = res.get("title", "").lower()
             snippet = res.get("snippet", "").lower()
+            content = title + " " + snippet
             link = res.get("link", "").lower()
-            full_content = title + " " + snippet
 
-            # 1. صيد "كلمات النفي" داخل العنوان أو الوصف
-            found_negation = [word for word in debunk_signals[lang] if word in full_content]
+            # أ- فحص التناقض (لو المستخدم قال خسارة وجوجل قال فوز)
+            for key, words in opposites.items():
+                if key in text:
+                    if any(w in content for w in words):
+                        points -= 40
+                        contradiction_found = True
+                        reasons.append(f"تضارب: المصادر تتحدث عن ({words[0]}) وليس ({key})")
+                        break
+
+            # ب- فحص النفي (العناوين المضللة)
+            if any(sig in content for sig in negation_signals):
+                points -= 30
+                reasons.append(f"تم رصد كلمات تكذيب في {link.split('/')[2]}")
+
+            # ج- فحص المصادر الموثوقة
+            if any(ts in link for ts in TRUSTED_SOURCES):
+                if not contradiction_found: points += 15
             
-            # 2. فحص المصدر
-            is_fact_checker = any(fc in link for fc in FACT_CHECKERS)
-            is_trusted = any(ts in link for ts in TRUSTED_SOURCES)
+            if any(fc in link for fc in FACT_CHECKERS):
+                if any(sig in content for sig in negation_signals):
+                    points = 10 # تكذيب قاطع من مدقق حقائق
+                    reasons.append("مدقق حقائق رسمي أكد أنها إشاعة")
 
-            if found_negation:
-                if is_fact_checker or is_trusted:
-                    fake_points += 45 # ثقل كبير للتكذيب من مصدر موثوق
-                    reasons.append(f"تأكيد من {link.split('/')[2]} أن الخبر إشاعة")
-                else:
-                    fake_points += 25 # ثقل متوسط لتكذيب من مصدر عام
-            
-            elif is_trusted:
-                # إذا وجدنا الخبر في مصدر موثوق وبدون أي كلمات نفي
-                real_points += 30
-
-            found_sources.append({"title": res['title'], "link": res['link']})
-
-        # --- القرار النهائي ---
-        if fake_points > real_points:
-            verdict = "❌ خبر كاذب (إشاعة)"
-            score = 20
-        elif real_points > 50:
+        # النتيجة النهائية
+        if points <= 35:
+            verdict = "❌ خبر كاذب / إشاعة"
+        elif points >= 75:
             verdict = "✅ خبر صادق ومؤكد"
-            score = 90
         else:
-            verdict = "⚠️ خبر مشكوك فيه أو مضلل"
-            score = 45
-            reasons.append("المعلومات متضاربة؛ العنوان قد يكون مضللاً بينما المحتوى ينفي.")
-
-        # استخراج أول ظهور (أقدم تاريخ)
-        dates = [res.get("date") for res in results if res.get("date")]
-        date_info = f"أول ظهور تم رصده: {dates[-1]}" if dates else "التاريخ غير محدد بدقة"
+            verdict = "⚠️ مشكوك فيه / مضلل"
 
         return {
             "verdict": verdict,
-            "score": score,
-            "date_info": date_info,
+            "score": max(0, min(100, points)),
             "reasons": list(set(reasons))[:2],
-            "sources": found_sources[:4]
+            "date_info": f"تاريخ التحقق: {today.strftime('%Y-%m-%d')}",
+            "sources": [{"title": r['title'], "link": r['link']} for r in results[:3]]
         }
 
     except Exception as e:
-        return {"verdict": "خطأ في الاتصال", "score": 0, "reasons": [str(e)]}
+        return {"verdict": "خطأ", "score": 0, "reasons": ["فشل الاتصال بالخادم"]}
 
 # ==========================================
-# 🌐 Routes & Web Logic
+# 🌐 مسارات الموقع (Routes)
 # ==========================================
-@app.route('/analyze', methods=['POST'])
-def analyze():
-    if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
-    
-    data = request.get_json()
-    text = data.get('text', '').strip()
-    lang = data.get('lang', 'ar')
-
-    # شرط 3 كلمات مفهومة (تجاوز الرموز)
-    words = re.findall(r'\w+', text)
-    if len(words) < 3:
-        msg = "يرجى إدخال 3 كلمات مفهومة على الأقل" if lang == 'ar' else "Min 3 words required"
-        return jsonify({"error": msg}), 400
-
-    if not any(c.isalpha() for c in text):
-        msg = "يجب إدخال كلمات وليس رموزاً فقط" if lang == 'ar' else "Use actual words"
-        return jsonify({"error": msg}), 400
-
-    result = analyze_news_logic(text, lang)
-    return jsonify(result)
-
-# --- نظام تسجيل الدخول (بإيجاز) ---
-
-DB_FILE = "local_db.json"
-def load_db():
-    if not os.path.exists(DB_FILE): return {"users": []}
-    with open(DB_FILE, 'r') as f: return json.load(f)
-
-def save_db(data):
-    with open(DB_FILE, 'w') as f: json.dump(data, f, indent=4)
 
 @app.route('/')
 def home():
     if 'user' not in session: return redirect(url_for('login'))
     return render_template('index.html', user=session['user'])
 
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    if 'user' not in session: return jsonify({"error": "غير مصرح لك"}), 401
+    
+    data = request.get_json()
+    text = data.get('text', '').strip()
+    lang = data.get('lang', 'ar')
+
+    # 1. التحقق من الطول (3 كلمات على الأقل)
+    words = re.findall(r'\w+', text)
+    if len(words) < 3:
+        return jsonify({"error": "يرجى إدخال 3 كلمات مفهومة على الأقل لضمان الدقة"}), 400
+
+    # 2. التحقق من وجود حروف
+    if not any(c.isalpha() for c in text):
+        return jsonify({"error": "النص يحتوي على رموز فقط، يرجى كتابة خبر حقيقي"}), 400
+
+    result = deep_analyze_news(text, lang)
+    return jsonify(result)
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         db = load_db()
-        user = next((u for u in db['users'] if u['username'] == request.form['username']), None)
-        if user and check_password_hash(user['password'], request.form['password']):
-            session['user'] = user['username']
+        username = request.form['username']
+        password = request.form['password']
+        user = next((u for u in db['users'] if u['username'] == username), None)
+        if user and check_password_hash(user['password'], password):
+            session['user'] = username
             return redirect(url_for('home'))
-        return render_template('login.html', error="خطأ في البيانات")
+        return render_template('login.html', error="بيانات الدخول خاطئة")
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -177,6 +188,9 @@ def register():
     if request.method == 'POST':
         db = load_db()
         username = request.form['username']
+        if any(u['username'] == username for u in db['users']):
+            return "اسم المستخدم موجود مسبقاً"
+        
         hashed_pw = generate_password_hash(request.form['password'])
         db['users'].append({"username": username, "password": hashed_pw})
         save_db(db)
@@ -189,6 +203,4 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(debug=True)
-
-
+    app.run(debug=True, port=5000)
