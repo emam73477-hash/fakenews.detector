@@ -4,179 +4,287 @@ import random
 import datetime
 import threading
 import requests
-import re
+import re  # تم إضافة re للتحقق من الكلمات
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "pro_secret_key_123")
+app.secret_key = os.environ.get("SECRET_KEY", "competition_secret")
 
 # ==========================================
-# 🔑 الإعدادات والمفاتيح
+# 🔑 API KEYS
 # ==========================================
 BREVO_API_KEY = os.environ.get("MAIL_PASSWORD") 
 SENDER_EMAIL = os.environ.get("MAIL_USERNAME")
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "YOUR_SERPER_KEY_HERE")
+
+# ==========================================
+# 🌍 Trusted Sources & Fact Checkers
+# ==========================================
+TRUSTED_SOURCES = [
+    "reuters.com", "bbc.com", "cnn.com", "aljazeera.com", "apnews.com",
+    "nytimes.com", "washingtonpost.com", "theguardian.com", "who.int", "bloomberg.com",
+    "aljazeera.net", "alarabiya.net", "skynewsarabia.com", "youm7.com", 
+    "masrawy.com", "shorouknews.com", "independentarabia.com", "bbc.com/arabic",
+    "al-ain.com", "kooora.com", "yallakora.com"
+]
+
+FACT_CHECKERS = [
+    "snopes.com", "politifact.com", "factcheck.org", "fullfact.org",
+    "fatabyyano.net", "misbar.com", "dabegad.com"
+]
+
+# ==========================================
+# 🗄️ Database & Helpers (Updated for History/Reports)
+# ==========================================
 DB_FILE = "local_db.json"
 
-# المصادر الموثوقة ومدققي الحقائق
-TRUSTED_SOURCES = [
-    "reuters.com", "bbc.com", "aljazeera.net", "alarabiya.net", "youm7.com", 
-    "skynewsarabia.com", "masrawy.com", "rt.com", "cnn.com", "apnews.com", 
-    "kooora.com", "yallakora.com", "filgoal.com", "al-ain.com"
-]
-FACT_CHECKERS = ["misbar.com", "fatabyyano.net", "dabegad.com", "snopes.com", "politifact.com"]
-
-# ==========================================
-# 🗄️ إدارة قاعدة البيانات (JSON)
-# ==========================================
 def load_db():
-    if not os.path.exists(DB_FILE): return {"users": [], "history": [], "reports": []}
+    if not os.path.exists(DB_FILE): 
+        return {"users": [], "news": [], "history": [], "reports": []}
     try: 
-        with open(DB_FILE, 'r', encoding='utf-8') as f: return json.load(f)
-    except: return {"users": [], "history": [], "reports": []}
+        with open(DB_FILE, 'r', encoding='utf-8') as f: 
+            data = json.load(f)
+            # التأكد من وجود المفاتيح الجديدة
+            for key in ["history", "reports"]:
+                if key not in data: data[key] = []
+            return data
+    except: return {"users": [], "news": [], "history": [], "reports": []}
 
 def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4, ensure_ascii=False)
+    with open(DB_FILE, 'w', encoding='utf-8') as f: 
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 def get_user(username):
     db = load_db()
-    return next((u for u in db['users'] if u['username'] == username), None)
+    for user in db['users']:
+        if user['username'] == username: return user
+    return None
+
+def create_user(user_data):
+    db = load_db()
+    for user in db['users']:
+        if user['username'] == user_data['username']: return False
+    user_data['created_at'] = str(datetime.datetime.now())
+    db['users'].append(user_data)
+    save_db(db)
+    return True
 
 # ==========================================
-# 📧 نظام التنبيهات البريدية (Brevo)
+# 📧 Email Logic (OTP + Admin Alerts)
 # ==========================================
-def send_email_otp(receiver_email, otp):
-    # نفس دالة الإرسال الأصلية للأكواد
+def send_email_logic(receiver_email, otp):
+    if not SENDER_EMAIL or not BREVO_API_KEY: return
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {"accept": "application/json", "api-key": BREVO_API_KEY, "content-type": "application/json"}
+    payload = {
+        "sender": {"name": "FakeNews Detector", "email": SENDER_EMAIL},
+        "to": [{"email": receiver_email}],
+        "subject": "Verification Code / كود التفعيل",
+        "htmlContent": f"<div style='text-align: center;'><h1>{otp}</h1></div>"
+    }
+    try: requests.post(url, headers=headers, json=payload, timeout=10)
+    except: pass
+
+def send_admin_alert(news_text, verdict):
+    """إضافة جديدة: إرسال تنبيه للمسؤول عند رصد خبر كاذب مؤكد"""
+    if not SENDER_EMAIL or not BREVO_API_KEY: return
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {"api-key": BREVO_API_KEY, "content-type": "application/json"}
     payload = {
-        "sender": {"name": "Detector App", "email": SENDER_EMAIL},
-        "to": [{"email": receiver_email}],
-        "subject": "Verification Code",
-        "htmlContent": f"<h1>{otp}</h1>"
-    }
-    requests.post(url, headers=headers, json=payload)
-
-def send_admin_alert(news_text, verdict):
-    """إضافة جديدة: تنبيه للمسؤول عند رصد خبر كاذب خطير"""
-    if not BREVO_API_KEY: return
-    headers = {"api-key": BREVO_API_KEY, "content-type": "application/json"}
-    payload = {
-        "sender": {"name": "AI ALERT", "email": SENDER_EMAIL},
+        "sender": {"name": "System Alert", "email": SENDER_EMAIL},
         "to": [{"email": SENDER_EMAIL}],
-        "subject": "⚠️ إشاعة قوية مرصودة",
-        "htmlContent": f"<p>تم فحص خبر وحصل على نتيجة ({verdict}):</p><b>{news_text}</b>"
+        "subject": "⚠️ High Confidence Fake News Detected",
+        "htmlContent": f"<p>AI detected a fake story: <b>{news_text}</b><br>Verdict: {verdict}</p>"
     }
-    requests.post("https://api.brevo.com/v3/smtp/email", headers=headers, json=payload)
+    try: requests.post(url, headers=headers, json=payload, timeout=10)
+    except: pass
 
 # ==========================================
-# 🧠 المحرك المطور (تحليل زمني، تناقض، وعناوين مضللة)
+# 🧠 AI Core: Enhanced Analysis Logic
 # ==========================================
-def analyze_news_logic(text, lang="ar"):
+def analyze_news_logic(text, lang="en"):
     url = "https://google.serper.dev/search"
-    today = datetime.datetime.now()
     
-    # 1. تحليل الوقت (أمس/اليوم)
-    tbs = "qdr:w" # أسبوع افتراضياً
-    if any(word in text for word in ["أمس", "اليوم", "today", "yesterday"]): tbs = "qdr:d2"
+    # تحسين البحث بإضافة كلمات حمالة للحقيقة (مثل 'حقيقة' أو 'truth')
+    search_query = f"{text} حقيقة" if lang == 'ar' else f"{text} truth"
+    
+    if lang == 'ar':
+        payload = json.dumps({"q": search_query, "gl": "eg", "hl": "ar"})
+        labels = {"real": "خبر حقيقي", "fake": "خبر زائف", "unsure": "غير مؤكد", "date": "أقدم ظهور: ", "negations": ["خدعة", "كذب", "إشاعة", "نفي", "مفبرك", "غير صحيح"]}
+    else:
+        payload = json.dumps({"q": search_query, "gl": "us", "hl": "en"})
+        labels = {"real": "REAL", "fake": "FAKE", "unsure": "UNVERIFIED", "date": "Earliest seen: ", "negations": ["hoax", "fake", "rumor", "denied", "false", "debunked"]}
 
-    # 2. الكلمات المناقضة (فوز ضد خسارة)
-    opposites = {"خسارة": ["فوز", "فاز"], "وفاة": ["بصحة", "ينفي", "إشاعة"], "loss": ["win"], "death": ["alive"]}
-    negation_signals = ["خدعة", "كذب", "إشاعة", "نفت", "fake", "rumor", "hoax"]
-
-    # البحث المزدوج
-    query = f"حقيقة {text}" if lang == "ar" else f"truth about {text}"
-    payload = {"q": query, "gl": "eg" if lang=="ar" else "us", "hl": lang, "num": 10, "tbs": tbs}
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
 
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        organic = res.json().get("organic", [])
-        if not organic: return {"verdict": "غير مؤكد", "score": 50, "reasons": ["لا نتائج"]}
+        response = requests.post(url, headers=headers, data=payload, timeout=10)
+        data = response.json()
+        organic_results = data.get("organic", [])
+        
+        if not organic_results:
+            return {"verdict": labels["unsure"], "score": 0, "reasons": ["No sources found"], "sources": []}
 
         score = 50
-        is_fake = False
         reasons = []
+        found_sources = []
+        is_fake_confirmed = False
+        all_dates = []
 
-        for item in organic:
-            content = (item.get("title", "") + " " + item.get("snippet", "")).lower()
-            link = item.get("link", "").lower()
+        for result in organic_results:
+            link = result.get("link", "").lower()
+            title = result.get("title", "").lower()
+            snippet = result.get("snippet", "").lower()
+            date = result.get("date", "")
+            if date: all_dates.append(date)
 
-            # كشف العناوين المضللة (مثل: خدعة وفاة..)
-            if any(sig in content for sig in negation_signals):
-                if any(ts in link for ts in TRUSTED_SOURCES + FACT_CHECKERS):
-                    is_fake = True
-                    reasons.append(f"تم كشفها كإشاعة في {link.split('/')[2]}")
+            # كشف التكذيب في العناوين (حل مشكلة خدعة موت فلان)
+            found_negation = any(word in title or word in snippet for word in labels["negations"])
+            
+            is_trusted = any(ts in link for ts in TRUSTED_SOURCES)
+            is_fact_checker = any(fc in link for fc in FACT_CHECKERS)
 
-            # كشف التناقض
-            for k, v in opposites.items():
-                if k in text and any(w in content for w in v):
-                    is_fake = True
-                    reasons.append(f"تضارب: المصادر تذكر {v[0]}")
+            if found_negation:
+                if is_trusted or is_fact_checker:
+                    is_fake_confirmed = True
+                    reasons.append(f"Confirmed as rumor by: {link.split('/')[2]}")
+                score -= 30
+            elif is_trusted:
+                score += 20
+                reasons.append(f"Source: {link.split('/')[2]}")
+                found_sources.append({"title": result.get("title"), "link": link})
 
-        verdict = "❌ خبر كاذب" if is_fake else ("✅ خبر صادق" if score > 60 else "⚠️ مضلل/غير مؤكد")
+        # النتيجة النهائية
+        if is_fake_confirmed:
+            verdict = labels["fake"]
+            score = 15
+        elif score >= 80:
+            verdict = labels["real"]
+        elif score <= 35:
+            verdict = labels["fake"]
+        else:
+            verdict = labels["unsure"]
+
+        earliest_date = all_dates[-1] if all_dates else "N/A"
+
         return {
-            "verdict": verdict, "score": 15 if is_fake else 85,
-            "reasons": list(set(reasons)), "sources": [{"title": r['title'], "link": r['link']} for r in organic[:3]]
+            "verdict": verdict,
+            "score": max(0, min(score, 100)),
+            "date_info": f"{labels['date']}{earliest_date}",
+            "reasons": list(set(reasons))[:2],
+            "sources": found_sources[:5]
         }
-    except: return {"verdict": "خطأ اتصال", "score": 0}
+
+    except Exception as e:
+        return {"verdict": "ERROR", "score": 0, "reasons": [str(e)], "sources": []}
 
 # ==========================================
-# 🆕 الإضافات الجديدة (Modules)
+# 🆕 New Modules: History, Reports, CheckSource
 # ==========================================
 
-def save_history(username, text, verdict):
-    """إضافة: سجل البحث"""
+def save_to_history(username, text, result):
     db = load_db()
-    db['history'].append({"user": username, "query": text, "verdict": verdict, "date": str(datetime.datetime.now())})
+    db['history'].append({
+        "user": username,
+        "query": text,
+        "verdict": result['verdict'],
+        "timestamp": str(datetime.datetime.now())
+    })
     save_db(db)
 
 @app.route('/report-error', methods=['POST'])
 def report_error():
-    """إضافة: نظام التبليغ"""
+    """إضافة: نظام التبليغ عن خطأ في النتيجة"""
+    if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
     data = request.get_json()
     db = load_db()
-    db['reports'].append({**data, "date": str(datetime.datetime.now())})
+    db['reports'].append({
+        "user": session['user'],
+        "query": data.get('query'),
+        "ai_verdict": data.get('verdict'),
+        "user_correction": data.get('correction'),
+        "timestamp": str(datetime.datetime.now())
+    })
     save_db(db)
-    return jsonify({"status": "ok"})
+    return jsonify({"message": "Report received"})
 
 @app.route('/check-source', methods=['POST'])
 def check_source():
-    """إضافة: فحص موثوقية الرابط"""
-    url = request.get_json().get('url', '').lower()
-    res = "غير مدرج"
-    if any(s in url for s in TRUSTED_SOURCES): res = "مصدر موثوق ✅"
-    elif any(s in url for s in FACT_CHECKERS): res = "مدقق حقائق 🔍"
-    return jsonify({"result": res})
+    """إضافة: فحص هل الرابط موثوق أم لا"""
+    data = request.get_json()
+    url = data.get('url', '').lower()
+    if any(s in url for s in TRUSTED_SOURCES): status = "Trusted Source ✅"
+    elif any(s in url for s in FACT_CHECKERS): status = "Fact Checker 🔍"
+    else: status = "Unknown/Unverified Source ⚠️"
+    return jsonify({"status": status})
 
 @app.route('/trending')
 def trending():
-    """إضافة: الأخبار الزائفة الرائجة"""
+    """إضافة: الأخبار الزائفة المنتشرة مؤخراً"""
     db = load_db()
-    fakes = [h for h in db['history'] if "كاذب" in h['verdict']]
+    fakes = [h for h in db['history'] if "زائف" in h['verdict'] or "FAKE" in h['verdict']]
     return jsonify(fakes[-5:])
 
 # ==========================================
-# 🌐 المسارات الأصلية (Routes)
+# 🌐 Routes
 # ==========================================
-
 @app.route('/analyze', methods=['POST'])
 def analyze():
     if 'user' not in session: return jsonify({"error": "Unauthorized"}), 401
+    
     data = request.get_json()
-    text, lang = data.get('text', ''), data.get('lang', 'ar')
+    news_text = data.get('text', '').strip()
+    lang = data.get('lang', 'ar')
     
-    # فلترة الكلمات والرموز
-    if len(re.findall(r'\w+', text)) < 3: return jsonify({"error": "أدخل 3 كلمات"}), 400
+    # --- التحقق من جودة المدخلات ---
+    words = re.findall(r'\w+', news_text)
+    if len(words) < 3:
+        error = "Please enter at least 3 words." if lang == 'en' else "يرجى إدخال 3 كلمات مفهومة على الأقل."
+        return jsonify({"error": error}), 400
 
-    result = analyze_news_logic(text, lang)
-    save_history(session['user'], text, result['verdict']) # حفظ السجل
+    if not any(c.isalpha() for c in news_text):
+        error = "Input must contain letters." if lang == 'en' else "يجب أن يحتوي النص على حروف."
+        return jsonify({"error": error}), 400
+        
+    result = analyze_news_logic(news_text, lang)
     
-    if result['score'] < 30: # تنبيه للمسؤول إذا الخبر كاذب جداً
-        threading.Thread(target=send_admin_alert, args=(text, result['verdict'])).start()
+    # حفظ في السجل
+    save_to_history(session['user'], news_text, result)
+    
+    # تنبيه المسؤول إذا كان الخبر كاذباً جداً
+    if result['score'] < 30:
+        threading.Thread(target=send_admin_alert, args=(news_text, result['verdict'])).start()
         
     return jsonify(result)
+
+# --- Auth Routes (تكملة الكود الأصلي) ---
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+        if get_user(username): return "Username exists"
+        otp = str(random.randint(1000, 9999))
+        thread = threading.Thread(target=send_email_logic, args=(email, otp))
+        thread.start()
+        session['temp_user'] = {"username": username, "email": email, "password": generate_password_hash(password)}
+        session['otp'] = otp
+        return redirect(url_for('verify_otp'))
+    return render_template('register.html')
+
+@app.route('/verify', methods=['GET', 'POST'])
+def verify_otp():
+    if 'temp_user' not in session: return redirect(url_for('register'))
+    if request.method == 'POST':
+        if request.form.get('otp') == session.get('otp'):
+            create_user(session['temp_user'])
+            session['user'] = session['temp_user']['username']
+            session.pop('temp_user', None)
+            return redirect(url_for('home'))
+    return render_template('verify.html', email=session['temp_user']['email'])
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -192,9 +300,12 @@ def home():
     if 'user' not in session: return redirect(url_for('login'))
     return render_template('index.html', user=session['user'])
 
-# (تكملة مسارات register و logout تبقى كما هي في كودك الأصلي)
+@app.route('/logout')
+def logout(): session.clear(); return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+
 
 
