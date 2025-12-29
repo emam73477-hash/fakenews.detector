@@ -4,312 +4,203 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YUVAi - AI Truth Detector</title>
+
+    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Icons -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <!-- Import Cairo Font for nice Arabic text -->
+
+    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
-    
+
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        /* Apply Cairo font if RTL class is active */
-        body.rtl { font-family: 'Cairo', sans-serif; direction: rtl; }
-        
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #2563eb; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; display: none; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .fade-in { animation: fadeIn 0.5s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        body { font-family: 'Inter', sans-serif; transition: 0.3s }
+        body.rtl { font-family: 'Cairo', sans-serif; direction: rtl }
+
+        #bg-video {
+            position: fixed;
+            inset: 0;
+            min-width: 100%;
+            min-height: 100%;
+            z-index: -1;
+            opacity: 0.15;
+            object-fit: cover;
+        }
+
+        .glass {
+            background: rgba(30,41,59,0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,.1);
+        }
+
+        .loader {
+            border: 4px solid #eee;
+            border-top: 4px solid #2563eb;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .fade-in {
+            animation: fadeIn .5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {opacity:0; transform: translateY(10px)}
+            to {opacity:1; transform: translateY(0)}
+        }
     </style>
 </head>
-<body class="bg-slate-900 text-white min-h-screen">
 
-    <!-- Navbar -->
-    <nav class="bg-slate-800 p-4 shadow-lg border-b border-slate-700 flex justify-between items-center sticky top-0 z-50">
-        <div class="flex items-center gap-4">
-            <h1 class="text-2xl font-bold text-blue-500 tracking-wider">
-                <i class="fas fa-shield-alt"></i> YUVAi
-            </h1>
-        </div>
-        
-        <div class="flex items-center gap-6">
-            <div class="hidden md:block text-right">
-                <p id="lbl_logged_in" class="text-xs text-gray-400 uppercase">Logged in as</p>
-                <p class="text-white font-bold">{{ user }}</p>
-            </div>
-            
-            <a href="/logout" class="bg-red-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-500 transition shadow flex items-center gap-2">
-                <span id="lbl_logout">Logout</span> <i class="fas fa-sign-out-alt"></i> 
-            </a>
-        </div>
-    </nav>
+<body class="bg-slate-950 text-white min-h-screen">
 
-    <div class="container mx-auto px-4 py-10">
-        
-        <!-- MAIN VERIFICATION TOOL -->
-        <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 mb-16 relative overflow-hidden">
-            <div class="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-blue-500 rounded-full opacity-10 blur-xl"></div>
+<!-- ================= VIDEO BACKGROUND ================= -->
+<video autoplay muted loop id="bg-video">
+    <source src="https://www.pexels.com/download/video/2235282/" type="video/mp4">
+</video>
 
-            <h2 id="lbl_title" class="text-3xl font-bold text-center mb-2">Check News Authenticity</h2>
-            <p id="lbl_subtitle" class="text-center text-gray-400 mb-8 text-sm">Paste a headline or article text below to verify it with AI.</p>
-
-            <div class="relative group">
-                <textarea id="newsText" rows="3" placeholder="Paste text here / ضع الخبر هنا..." 
-                    class="w-full p-4 bg-slate-900 border border-slate-600 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-lg transition shadow-inner"
-                    onkeypress="handleEnter(event)" oninput="detectInputLang(this)"></textarea>
-                
-                <button onclick="checkNews()" id="verifyBtn" 
-                    class="absolute bottom-3 right-3 bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-bold transition flex items-center gap-2 shadow-lg hover:shadow-blue-500/20">
-                    <span id="lbl_btn">Verify</span> <i class="fas fa-search"></i>
-                </button>
-            </div>
-            
-            <!-- LOADER -->
-            <div class="flex justify-center mt-6">
-                <div id="loading" class="loader"></div>
-            </div>
-
-            <!-- RESULT CARD -->
-            <div id="resultCard" class="hidden mt-8 p-6 bg-slate-700/50 rounded-xl border border-slate-600 fade-in relative">
-                
-                <button onclick="document.getElementById('resultCard').classList.add('hidden')" class="absolute top-2 right-3 text-gray-500 hover:text-white">
-                    <i class="fas fa-times"></i>
-                </button>
-
-                <div class="flex flex-col md:flex-row justify-between items-start mb-4 gap-4">
-                    <div>
-                        <h3 id="lbl_result_header" class="text-gray-400 text-xs uppercase font-bold tracking-wider">AI Analysis Result</h3>
-                        <h2 id="verdictTitle" class="text-3xl font-extrabold mt-1 tracking-tight"></h2>
-                    </div>
-                    <div id="scoreBadge" class="text-xl font-bold px-4 py-2 rounded-lg bg-gray-800 shadow-lg border border-white/10"></div>
-                </div>
-
-                <div id="dateSection" class="mb-5 hidden">
-                    <span id="dateText" class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-blue-900 text-blue-200 border border-blue-700">
-                        <i class="far fa-calendar-alt"></i> Loading...
-                    </span>
-                </div>
-
-                <div class="w-full bg-gray-900 rounded-full h-4 mb-4 border border-gray-700 p-0.5">
-                    <div id="scoreBar" class="bg-blue-500 h-full rounded-full transition-all duration-1000 relative" style="width: 0%"></div>
-                </div>
-                
-                <div class="mt-4 bg-slate-800/80 p-5 rounded-lg border border-slate-600">
-                    <h4 id="lbl_reasons" class="text-gray-400 text-xs font-bold uppercase mb-3">Key Indicators</h4>
-                    <ul id="reasonsList" class="space-y-2 text-sm text-gray-300"></ul>
-                </div>
-
-                <div id="sourcesContainer" class="mt-4 hidden">
-                    <h4 id="lbl_sources" class="text-gray-400 text-xs font-bold uppercase mb-2">Related Sources</h4>
-                    <div id="sourcesList" class="grid gap-2"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- RECENT FEED HEADER -->
-        <div class="flex items-center justify-between mb-6">
-            <h3 class="text-xl font-bold flex items-center gap-2">
-                <i class="fas fa-database text-blue-400"></i> <span id="lbl_recent">Recent Verifications</span>
-            </h3>
-        </div>
-        
-        <!-- (Existing News Grid Logic Here - Kept simple for brevity) -->
-         {% if news|length == 0 %}
-        <div class="text-center py-12 bg-slate-800 rounded-xl border border-slate-700 border-dashed">
-            <i class="fas fa-server text-4xl text-gray-600 mb-4"></i>
-            <p class="text-gray-400">Database is clean. Verify your first news above!</p>
-        </div>
-        {% else %}
-        <!-- News Grid Placeholder -->
-        <div class="text-center text-gray-500">News history displayed here...</div>
-        {% endif %}
-
+<!-- ================= NAVBAR ================= -->
+<nav class="glass p-4 flex justify-between items-center sticky top-0 z-50">
+    <div class="flex items-center gap-3">
+        <i class="fas fa-shield-halved text-3xl text-blue-500"></i>
+        <h1 class="text-2xl font-black text-blue-400">YUVAi</h1>
     </div>
-    
-    <script>
-        // ==========================================
-        // 🌍 TRANSLATION DICTIONARY
-        // ==========================================
-        const strings = {
-            en: {
-                title: "Check News Authenticity",
-                subtitle: "Paste a headline or article text below to verify it with AI.",
-                btn: "Verify",
-                analyzing: "Analyzing...",
-                resultHeader: "AI Analysis Result",
-                reasons: "Key Indicators",
-                sources: "Related Sources",
-                recent: "Recent Verifications",
-                logout: "Logout",
-                loggedIn: "Logged in as"
-            },
-            ar: {
-                title: "كشف حقيقة الأخبار",
-                subtitle: "الصق عنوان الخبر أو النص هنا للتحقق من مصداقيته باستخدام الذكاء الاصطناعي.",
-                btn: "تحقق الآن",
-                analyzing: "جاري التحليل...",
-                resultHeader: "نتيجة تحليل الذكاء الاصطناعي",
-                reasons: "المؤشرات الرئيسية",
-                sources: "المصادر المرتبطة",
-                recent: "عمليات التحقق الأخيرة",
-                logout: "خروج",
-                loggedIn: "تم الدخول بـ"
-            }
-        };
+    <a href="/logout" class="text-red-400 font-bold flex items-center gap-2">
+        <span id="lbl_logout">Logout</span>
+        <i class="fas fa-power-off"></i>
+    </a>
+</nav>
 
-        let currentLang = 'en';
+<!-- ================= HERO CHECKER ================= -->
+<section class="container mx-auto px-4 py-14">
+    <div class="max-w-4xl mx-auto glass p-10 rounded-3xl">
+        <h2 id="lbl_title" class="text-4xl font-black text-center mb-3">
+            Check Authenticity
+        </h2>
+        <p id="lbl_subtitle" class="text-center text-gray-400 mb-10">
+            Neural AI fact-checking system
+        </p>
 
-        // 1. Detect Language on Input
-        function detectInputLang(textarea) {
-            const text = textarea.value;
-            // Check if text contains Arabic characters
-            const isArabic = /[\u0600-\u06FF]/.test(text);
-            
-            if (isArabic && currentLang !== 'ar') {
-                setLanguage('ar');
-            } else if (!isArabic && text.length > 0 && currentLang !== 'en') {
-                setLanguage('en');
-            }
-        }
+        <div class="relative">
+            <textarea id="newsText" rows="3"
+                class="w-full p-6 bg-black/40 rounded-2xl text-xl"
+                placeholder="Paste news text..."
+                oninput="detectLang(this)"></textarea>
 
-        // 2. Switch UI Language
-        function setLanguage(lang) {
-            currentLang = lang;
-            const body = document.body;
-            const t = strings[lang];
+            <button onclick="checkNews()"
+                id="verifyBtn"
+                class="absolute bottom-4 right-4 bg-blue-600 px-8 py-3 rounded-xl font-black">
+                <span id="lbl_btn">Verify</span>
+                <i class="fas fa-search"></i>
+            </button>
+        </div>
 
-            // Toggle CSS class for RTL/Font
-            if (lang === 'ar') {
-                body.classList.add('rtl');
-                document.getElementById('verifyBtn').classList.remove('right-3');
-                document.getElementById('verifyBtn').classList.add('left-3'); // Move button to left in RTL
-            } else {
-                body.classList.remove('rtl');
-                document.getElementById('verifyBtn').classList.add('right-3');
-                document.getElementById('verifyBtn').classList.remove('left-3');
-            }
+        <!-- Result -->
+        <div id="resultCard" class="hidden mt-10 p-8 rounded-2xl bg-blue-600/10 fade-in">
+            <h2 id="verdictTitle" class="text-3xl font-black"></h2>
+            <p id="dateText" class="text-blue-400 mt-2"></p>
+            <div id="scoreBadge" class="mt-4 text-2xl font-black"></div>
+            <div class="w-full bg-black/40 rounded-full h-3 mt-6">
+                <div id="scoreBar" class="h-full bg-blue-500 rounded-full" style="width:0%"></div>
+            </div>
+        </div>
+    </div>
+</section>
 
-            // Update Static Text
-            document.getElementById('lbl_title').innerText = t.title;
-            document.getElementById('lbl_subtitle').innerText = t.subtitle;
-            document.getElementById('lbl_btn').innerText = t.btn;
-            document.getElementById('lbl_result_header').innerText = t.resultHeader;
-            document.getElementById('lbl_reasons').innerText = t.reasons;
-            document.getElementById('lbl_sources').innerText = t.sources;
-            document.getElementById('lbl_recent').innerText = t.recent;
-            document.getElementById('lbl_logout').innerText = t.logout;
-            document.getElementById('lbl_logged_in').innerText = t.loggedIn;
-        }
+<!-- ================= ADVANCED ANALYSIS PANEL ================= -->
+<section class="container mx-auto px-4 pb-20">
+    <div class="max-w-3xl mx-auto bg-slate-800 p-8 rounded-2xl border border-slate-700">
+        <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+            <i class="fas fa-database text-blue-400"></i>
+            Advanced AI Analysis
+        </h3>
 
-        function handleEnter(e) {
-            if(e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                checkNews();
-            }
-        }
+        <div id="loading" class="loader mx-auto my-6"></div>
 
-        async function checkNews() {
-            const text = document.getElementById('newsText').value.trim();
-            const btn = document.getElementById('verifyBtn');
-            const loader = document.getElementById('loading');
-            const resultCard = document.getElementById('resultCard');
-            
-            if(!text) return;
+        <div id="reasonsBox" class="hidden fade-in">
+            <h4 class="text-gray-400 uppercase text-xs mb-2">Key Indicators</h4>
+            <ul id="reasonsList" class="space-y-2 text-sm"></ul>
+        </div>
 
-            // UI Loading
-            resultCard.classList.add('hidden');
-            loader.style.display = "block";
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${strings[currentLang].analyzing}`;
-            btn.classList.add('opacity-50', 'cursor-not-allowed');
-            
-            try {
-                // Send text AND detected language to backend
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'}, // Changed to JSON for easier handling
-                    body: JSON.stringify({ text: text, lang: currentLang }) 
-                });
+        <div id="sourcesContainer" class="hidden mt-6">
+            <h4 class="text-gray-400 uppercase text-xs mb-2">Trusted Sources</h4>
+            <div id="sourcesList" class="space-y-2"></div>
+        </div>
+    </div>
+</section>
 
-                if (!response.ok) throw new Error("Server Error");
+<!-- ================= AUDIO ================= -->
+<audio id="snd_real" src="https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3"></audio>
+<audio id="snd_fake" src="https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3"></audio>
 
-                const data = await response.json();
-                
-                // Reset UI
-                loader.style.display = "none";
-                resultCard.classList.remove('hidden');
-                btn.disabled = false;
-                btn.innerHTML = `${strings[currentLang].btn} <i class="fas fa-search"></i>`;
-                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+<!-- ================= SCRIPT ================= -->
+<script>
+const strings = {
+    en: { title:"Check Authenticity", btn:"Verify" },
+    ar: { title:"تحقق من المصداقية", btn:"تحقق الآن" }
+};
 
-                // Update Results
-                const title = document.getElementById('verdictTitle');
-                const badge = document.getElementById('scoreBadge');
-                
-                title.innerText = data.verdict;
-                // Add % sign based on language direction
-                badge.innerText = currentLang === 'ar' ? `%${data.score} ثقة` : `${data.score}% Trust`;
+let currentLang = "en";
 
-                // Color Logic
-                let colorClass = "bg-yellow-500"; 
-                let textClass = "text-yellow-400";
+function detectLang(el){
+    const isAr = /[\u0600-\u06FF]/.test(el.value);
+    currentLang = isAr ? "ar" : "en";
+    document.body.classList.toggle("rtl", isAr);
+    lbl_title.innerText = strings[currentLang].title;
+    lbl_btn.innerText = strings[currentLang].btn;
+}
 
-                if (data.score >= 80) {
-                    textClass = "text-green-400";
-                    colorClass = "bg-green-600";
-                } else if(data.score <= 30) {
-                    textClass = "text-red-400";
-                    colorClass = "bg-red-600";
-                }
+async function checkNews(){
+    const text = newsText.value.trim();
+    if(text.split(" ").length < 3) return alert("Write at least 3 words");
 
-                title.className = `text-3xl font-extrabold mt-1 ${textClass}`;
-                badge.className = `text-xl font-bold px-4 py-2 rounded-lg text-white ${colorClass}`;
-                document.getElementById('scoreBar').className = `${colorClass} h-full rounded-full transition-all relative`;
-                setTimeout(() => document.getElementById('scoreBar').style.width = data.score + "%", 100);
+    loading.style.display = "block";
 
-                // Date
-                const dateDiv = document.getElementById('dateSection');
-                if(data.date_info && data.date_info !== "Date unavailable") {
-                    dateDiv.classList.remove('hidden');
-                    document.getElementById('dateText').innerText = data.date_info;
-                } else {
-                    dateDiv.classList.add('hidden');
-                }
+    const res = await fetch("/analyze",{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text,lang:currentLang})
+    });
 
-                // Reasons
-                const list = document.getElementById('reasonsList');
-                list.innerHTML = "";
-                data.reasons.forEach(r => {
-                    list.innerHTML += `<li class="flex gap-2 items-start"><i class="fas fa-check-circle mt-1 text-blue-400 text-xs"></i> <span>${r}</span></li>`;
-                });
+    const data = await res.json();
 
-                // Sources
-                const sourcesDiv = document.getElementById('sourcesList');
-                const sourcesContainer = document.getElementById('sourcesContainer');
-                sourcesDiv.innerHTML = "";
-                
-                if (data.sources && data.sources.length > 0) {
-                    sourcesContainer.classList.remove('hidden');
-                    data.sources.forEach(s => {
-                        let domain = s.link ? new URL(s.link).hostname.replace('www.','') : 'Source';
-                        sourcesDiv.innerHTML += `
-                            <a href="${s.link}" target="_blank" class="group block bg-slate-900/50 p-3 rounded border border-gray-700 hover:border-blue-500 hover:bg-slate-800 transition flex justify-between items-center">
-                                <div class="text-left">
-                                    <div class="text-[10px] font-bold text-blue-400 uppercase tracking-wider">${domain}</div>
-                                    <div class="text-sm font-medium text-gray-300 group-hover:text-white truncate w-64">${s.title}</div>
-                                </div>
-                                <i class="fas fa-external-link-alt text-gray-600 group-hover:text-blue-400"></i>
-                            </a>
-                        `;
-                    });
-                } else {
-                    sourcesContainer.classList.add('hidden');
-                }
+    loading.style.display = "none";
+    resultCard.classList.remove("hidden");
+    verdictTitle.innerText = data.verdict;
+    dateText.innerText = data.date_info;
+    scoreBadge.innerText = data.score + "%";
+    scoreBar.style.width = data.score + "%";
 
-            } catch(e) {
-                console.error(e);
-                loader.style.display = "none";
-                alert("Connection Error");
-            }
-        }
-    </script>
+    if(data.score >= 80) snd_real.play();
+    else if(data.score <= 35) snd_fake.play();
+
+    reasonsList.innerHTML="";
+    data.reasons.forEach(r=>{
+        reasonsList.innerHTML+=`<li>✔ ${r}</li>`;
+    });
+    reasonsBox.classList.remove("hidden");
+
+    if(data.sources?.length){
+        sourcesList.innerHTML="";
+        data.sources.forEach(s=>{
+            sourcesList.innerHTML+=`
+            <a href="${s.link}" target="_blank" class="block text-blue-400 underline">
+                ${s.title}
+            </a>`;
+        });
+        sourcesContainer.classList.remove("hidden");
+    }
+}
+</script>
+
 </body>
 </html>
+
+
