@@ -67,10 +67,16 @@ DEMO_USER = {
     "created_at": str(datetime.datetime.now())
 }
 
-db = load_db()
-if not any(u["username"] == DEMO_USER["username"] for u in db["users"]):
-    db["users"].append(DEMO_USER)
-    save_db(db)
+def get_user(identifier):
+    db = load_db()
+    return next(
+        (
+            u for u in db['users']
+            if u['username'] == identifier or u['email'] == identifier
+        ),
+        None
+    )
+
 
 # ==========================================
 # 🧠 AI Core
@@ -172,6 +178,7 @@ def logout():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
 
 
 
