@@ -9,14 +9,22 @@
 </head>
 <body class="bg-black text-white transition-all">
 
-<video class="bg-video" autoplay muted loop>
-  <source src="https://cdn.pixabay.com/vimeo/458342534/pexels-nature-video.mp4?width=640&hash=12345" type="video/mp4">
-  
+<!-- Background Video -->
+<video autoplay muted loop id="bg-video" class="fixed top-0 left-0 w-full h-full object-cover -z-10">
+    <source src="https://www.pexels.com/download/video/34645150/" type="video/mp4">
 </video>
+
+<!-- Navbar -->
+<nav class="glass p-4 shadow-2xl flex justify-between items-center sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+        <i class="fas fa-shield-halved text-3xl text-blue-500"></i>
+        <h1 class="text-2xl font-black tracking-tighter text-blue-400">YUVAi</h1>
+    </div>
+    <div class="flex items-center gap-6">
         <div class="hidden md:flex items-center gap-3">
             <div class="text-right">
                 <p id="lbl_logged_in" class="text-[10px] text-gray-500 uppercase">System Active</p>
-                <p class="text-sm font-bold">{{ user }}</p>
+                <p class="text-sm font-bold">emam73477@gmail.com</p>
             </div>
             <img src="https://images.pexels.com/photos/8386366/pexels-photo-8386366.jpeg" class="w-10 h-10 rounded-full border-2 border-blue-600 object-cover">
         </div>
@@ -96,12 +104,12 @@
     </div>
 
     <!-- Empty State -->
-    {% if news|length == 0 %}
+    
     <div class="text-center opacity-40">
         <img src="https://images.pexels.com/photos/32452878/pexels-photo-32452878.jpeg" class="w-64 mx-auto rounded-full h-64 object-cover mb-6 border-4 border-blue-500/20">
         <p>Waiting for the first verification scan...</p>
     </div>
-    {% endif %}
+    
 
     <!-- Global Network Image -->
     <div class="mt-40 text-center">
@@ -176,6 +184,10 @@
 
 </body>
 </html>
+
+
+
+
 
 
 
